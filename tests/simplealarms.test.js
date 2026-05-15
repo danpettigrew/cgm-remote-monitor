@@ -1,15 +1,12 @@
 var should = require('should');
-var levels = require('../lib/levels');
+const helper = require('./inithelper')();
 
 describe('simplealarms', function ( ) {
+  var env = require('../lib/server/env')();
+  var ctx = helper.getctx();
 
-  var simplealarms = require('../lib/plugins/simplealarms')();
+  var simplealarms = require('../lib/plugins/simplealarms')(ctx);
 
-  var env = require('../env')();
-  var ctx = {
-    settings: {}
-    , language: require('../lib/language')()
-  };
   ctx.ddata = require('../lib/data/ddata')();
   ctx.notifications = require('../lib/notifications')(env, ctx);
   var bgnow = require('../lib/plugins/bgnow')(ctx);
@@ -31,14 +28,20 @@ describe('simplealarms', function ( ) {
 
   it('should trigger a warning when above target', function (done) {
     ctx.notifications.initRequests();
-    ctx.ddata.sgvs = [{mills: before, mgdl: 171}, {mills: now, mgdl: 181}];
+    ctx.ddata.sgvs = [{mills: before, mgdl: 171}, {mills: now, mgdl: 182}];
 
     var sbx = require('../lib/sandbox')().serverInit(env, ctx);
     bgnow.setProperties(sbx);
     simplealarms.checkNotifications(sbx);
     var highest = ctx.notifications.findHighestAlarm();
-    highest.level.should.equal(levels.WARN);
-    highest.message.should.equal('BG Now: 181 +10 mg/dl');
+    highest.level.should.equal(ctx.levels.WARN);
+
+    var expectedMessage =
+      sbx.settings.units === 'mmol' ?
+        'BG Now: 10.1 +0.6 mmol/L' :
+        'BG Now: 182 +11 mg/dl';
+    highest.message.should.equal(expectedMessage);
+
     done();
   });
 
@@ -48,7 +51,7 @@ describe('simplealarms', function ( ) {
 
     var sbx = require('../lib/sandbox')().serverInit(env, ctx);
     simplealarms.checkNotifications(sbx);
-    ctx.notifications.findHighestAlarm().level.should.equal(levels.URGENT);
+    ctx.notifications.findHighestAlarm().level.should.equal(ctx.levels.URGENT);
 
     done();
   });
@@ -59,7 +62,7 @@ describe('simplealarms', function ( ) {
 
     var sbx = require('../lib/sandbox')().serverInit(env, ctx);
     simplealarms.checkNotifications(sbx);
-    ctx.notifications.findHighestAlarm().level.should.equal(levels.WARN);
+    ctx.notifications.findHighestAlarm().level.should.equal(ctx.levels.WARN);
 
     done();
   });
@@ -70,7 +73,7 @@ describe('simplealarms', function ( ) {
 
     var sbx = require('../lib/sandbox')().serverInit(env, ctx);
     simplealarms.checkNotifications(sbx);
-    ctx.notifications.findHighestAlarm().level.should.equal(levels.URGENT);
+    ctx.notifications.findHighestAlarm().level.should.equal(ctx.levels.URGENT);
 
     done();
   });

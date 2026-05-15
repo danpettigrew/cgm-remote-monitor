@@ -4,15 +4,21 @@ var request = require('supertest');
 var load = require('./fixtures/load');
 var bootevent = require('../lib/server/bootevent');
 var language = require('../lib/language')();
+
 require('should');
+
+const FIVE_MINUTES=1000*60*5;
 
 describe('Entries REST api', function ( ) {
   var entries = require('../lib/api/entries/');
   var self = this;
+  var known = 'b723e97aa97846eb92d5264f084b2823f57c4aa1';
 
   this.timeout(10000);
   before(function (done) {
-    self.env = require('../env')( );
+    delete process.env.API_SECRET;
+    process.env.API_SECRET = 'this is my long pass phrase';
+    self.env = require('../lib/server/env')( );
     self.env.settings.authDefaultRoles = 'readable';
     self.wares = require('../lib/middleware/')(self.env);
     self.archive = null;
@@ -21,25 +27,42 @@ describe('Entries REST api', function ( ) {
     bootevent(self.env, language).boot(function booted (ctx) {
       self.app.use('/', entries(self.app, self.wares, ctx, self.env));
       self.archive = require('../lib/server/entries')(self.env, ctx);
-
-      var creating = load('json');
-      creating.push({type: 'sgv', sgv: 100, date: Date.now()});
-      self.archive.create(creating, done);
+      self.ctx = ctx;
+      done();
     });
   });
 
   beforeEach(function (done) {
     var creating = load('json');
-    creating.push({type: 'sgv', sgv: 100, date: Date.now()});
-    self.archive.create(creating, done);
+
+    for (let i = 0; i < 20; i++) {
+      const e = {type: 'sgv', sgv: 100, date: Date.now()};
+      e.date = e.date - FIVE_MINUTES * i;
+      creating.push(e);
+    }    creating = creating.sort((a, b) => a.date - b.date);
+
+    function setupDone() {
+      console.log('Setup complete');
+      done();
+    }
+
+    function waitForASecond() {
+      // wait for event processing of cache entries to actually finish
+      setTimeout(function() {
+        setupDone();
+       }, 100);
+    }
+
+    self.archive.create(creating, waitForASecond);
+
   });
 
-  afterEach(function (done) {
-    self.archive( ).remove({ }, done);
+  afterEach(async function () {
+    await self.archive( ).deleteMany({ });
   });
 
-  after(function (done) {
-    self.archive( ).remove({ }, done);
+  after(async function () {
+    await self.archive( ).deleteMany({ });
   });
 
   // keep this test pinned at or near the top in order to validate all
@@ -75,17 +98,34 @@ describe('Entries REST api', function ( ) {
       .expect(200)
       .end(function (err, res) {
         res.body.should.be.instanceof(Array).and.have.lengthOf(defaultCount);
-        
+
         var array = res.body;
         var firstEntry = array[0];
         var secondEntry = array[1];
-        
+
         firstEntry.date.should.be.above(secondEntry.date);
-        
+
         done( );
       });
   });
 
+  it('gets entries in right order without type specifier', function (done) {
+    var defaultCount = 10;
+    request(self.app)
+      .get('/entries.json')
+      .expect(200)
+      .end(function (err, res) {
+        res.body.should.be.instanceof(Array).and.have.lengthOf(defaultCount);
+
+        var array = res.body;
+        var firstEntry = array[0];
+        var secondEntry = array[1];
+
+        firstEntry.date.should.be.above(secondEntry.date);
+
+        done( );
+      });
+  });
 
   it('/echo/ api shows query', function (done) {
     request(self.app)
@@ -193,7 +233,7 @@ describe('Entries REST api', function ( ) {
 
   it('/entries/:id', function (done) {
     var app = self.app;
-    self.archive.list({count: 1}, function(err, records) {
+    self.archive.list({count: 10}, function(err, records) {
       var currentId = records.pop()._id.toString();
       request(app)
         .get('/entries/'+currentId+'.json')
@@ -222,7 +262,7 @@ describe('Entries REST api', function ( ) {
       .post('/entries/preview.json')
       .send(load('json'))
       .expect(401)
-      .end(function (err, res) {
+      .end(function () {
         // res.body.should.be.instanceof(Array).and.have.lengthOf(30);
         done();
       });
@@ -254,7 +294,7 @@ describe('Entries REST api', function ( ) {
     console.log('Inserting glucose entry')
     request(self.app)
       .post('/entries/')
-      .set('api-secret', self.env.api_secret || '')
+      .set('api-secret', known || '')
       .send({
         "type": "sgv", "sgv": "199", "dateString": "2014-07-20T00:44:15.000-07:00"
         , "date": 1405791855000, "device": "dexcom", "direction": "NOT COMPUTABLE"
@@ -268,7 +308,7 @@ describe('Entries REST api', function ( ) {
           console.log('Ensuring glucose entry was inserted successfully');
           request(self.app)
             .get('/entries.json?find[dateString][$gte]=2014-07-20&count=100')
-            .set('api-secret', self.env.api_secret || '')
+            .set('api-secret', known || '')
             .expect(200)
             .expect(function (response) {
               var entry = response.body[0];
@@ -283,7 +323,7 @@ describe('Entries REST api', function ( ) {
                 console.log('Deleting test glucose entry');
                 request(self.app)
                   .delete('/entries.json?find[dateString][$gte]=2014-07-20&count=100')
-                  .set('api-secret', self.env.api_secret || '')
+                  .set('api-secret', known || '')
                   .expect(200)
                   .end(function (err) {
                     if (err) {
@@ -293,7 +333,7 @@ describe('Entries REST api', function ( ) {
                       console.log('Testing if glucose entry was deleted');
                       request(self.app)
                         .get('/entries.json?find[dateString][$gte]=2014-07-20&count=100')
-                        .set('api-secret', self.env.api_secret || '')
+                        .set('api-secret', known || '')
                         .expect(200)
                         .expect(function (response) {
                           response.body.length.should.equal(0);
@@ -304,6 +344,126 @@ describe('Entries REST api', function ( ) {
               }
             });
         }
+      });
+  });
+
+  it('post multiple entries, query, delete, verify gone', function (done) {
+    // insert a glucose entry - needs to be unique from example data
+    console.log('Inserting glucose entry')
+    request(self.app)
+      .post('/entries/')
+      .set('api-secret', known || '')
+      .send([{
+        "type": "sgv", "sgv": "199", "dateString": "2014-07-20T00:44:15.000-07:00"
+        , "date": 1405791855000, "device": "dexcom", "direction": "NOT COMPUTABLE"
+      }, {
+        "type": "sgv", "sgv": "200", "dateString": "2014-07-20T00:44:15.001-07:00"
+        , "date": 1405791855001, "device": "dexcom", "direction": "NOT COMPUTABLE"
+      }])
+      .expect(200)
+      .end(function (err) {
+        if (err) {
+          done(err);
+        } else {
+          // make sure treatment was inserted successfully
+          console.log('Ensuring glucose entry was inserted successfully');
+          request(self.app)
+            .get('/entries.json?find[dateString][$gte]=2014-07-20&count=100')
+            .set('api-secret', known || '')
+            .expect(200)
+            .expect(function (response) {
+              var entry = response.body[0];
+              response.body.length.should.equal(2);
+              entry.sgv.should.equal('200');
+              entry.utcOffset.should.equal(-420);
+            })
+            .end(function (err) {
+              if (err) {
+                done(err);
+              } else {
+                // delete the glucose entry
+                console.log('Deleting test glucose entry');
+                request(self.app)
+                  .delete('/entries.json?find[dateString][$gte]=2014-07-20&count=100')
+                  .set('api-secret', known || '')
+                  .expect(200)
+                  .end(function (err) {
+                    if (err) {
+                      done(err);
+                    } else {
+                      // make sure it was deleted
+                      console.log('Testing if glucose entries were deleted');
+                      request(self.app)
+                        .get('/entries.json?find[dateString][$gte]=2014-07-20&count=100')
+                        .set('api-secret', known || '')
+                        .expect(200)
+                        .expect(function (response) {
+                          response.body.length.should.equal(0);
+                        })
+                        .end(done);
+                    }
+                  });
+              }
+            });
+        }
+      });
+  });
+
+  // ============================================================
+  // Single object input tests - validates response format
+  // ============================================================
+
+  it('post single entry returns array with one item', function (done) {
+    var now = Date.now();
+    var dateString = new Date(now).toISOString();
+    
+    request(self.app)
+      .post('/entries/')
+      .set('api-secret', known || '')
+      .send({
+        type: 'sgv',
+        sgv: 142,
+        date: now,
+        dateString: dateString,
+        device: 'test-device',
+        direction: 'Flat'
+      })
+      .expect(200)
+      .end(function (err, res) {
+        if (err) {
+          return done(err);
+        }
+        // Response should be an array even for single object input
+        res.body.should.be.instanceof(Array);
+        res.body.length.should.be.above(0);
+        res.body[0].should.have.property('_id');
+        res.body[0].sgv.should.equal(142);
+        res.body[0].type.should.equal('sgv');
+        res.body[0].direction.should.equal('Flat');
+
+        // Clean up
+        request(self.app)
+          .delete('/entries.json?find[date]=' + now)
+          .set('api-secret', known || '')
+          .expect(200)
+          .end(done);
+      });
+  });
+
+  it('post empty array returns empty result', function (done) {
+    request(self.app)
+      .post('/entries/')
+      .set('api-secret', known || '')
+      .send([])
+      .expect(200)
+      .end(function (err, res) {
+        if (err) {
+          return done(err);
+        }
+        // Empty input should return success with empty or minimal response
+        res.body.should.be.instanceof(Array);
+        res.body.length.should.equal(0);
+        done();
       });
   });
 

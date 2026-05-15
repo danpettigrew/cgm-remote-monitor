@@ -1,17 +1,16 @@
-var _ = require('lodash');
 var should = require('should');
 var levels = require('../lib/levels');
 
 describe('treatmentnotify', function ( ) {
 
-  var treatmentnotify = require('../lib/plugins/treatmentnotify')();
-
-  var env = require('../env')();
+  var env = require('../lib/server/env')();
   var ctx = {};
   ctx.ddata = require('../lib/data/ddata')();
   ctx.notifications = require('../lib/notifications')(env, ctx);
   ctx.levels = levels;
   ctx.language = require('../lib/language')().set('en');
+
+  var treatmentnotify = require('../lib/plugins/treatmentnotify')(ctx);
 
   var now = Date.now();
 
@@ -25,7 +24,7 @@ describe('treatmentnotify', function ( ) {
     should.not.exist(ctx.notifications.findHighestAlarm());
     should.exist(ctx.notifications.snoozedBy({level: levels.URGENT}));
 
-    _.first(ctx.notifications.findUnSnoozeable()).level.should.equal(levels.INFO);
+    ctx.notifications.findUnSnoozeable()?.[0]?.level.should.equal(levels.INFO);
 
     done();
   });
@@ -40,7 +39,7 @@ describe('treatmentnotify', function ( ) {
     should.not.exist(ctx.notifications.findHighestAlarm());
     should.exist(ctx.notifications.snoozedBy({level: levels.URGENT}));
 
-    should.not.exist(_.first(ctx.notifications.findUnSnoozeable()));
+    should.not.exist(ctx.notifications.findUnSnoozeable()?.[0]);
 
     done();
   });
@@ -55,7 +54,7 @@ describe('treatmentnotify', function ( ) {
     should.not.exist(ctx.notifications.findHighestAlarm());
     should.exist(ctx.notifications.snoozedBy({level: levels.URGENT}));
 
-    _.first(ctx.notifications.findUnSnoozeable()).level.should.equal(levels.INFO);
+    ctx.notifications.findUnSnoozeable()?.[0]?.level.should.equal(levels.INFO);
 
     done();
   });
@@ -70,7 +69,7 @@ describe('treatmentnotify', function ( ) {
     should.not.exist(ctx.notifications.findHighestAlarm());
     should.exist(ctx.notifications.snoozedBy({level: levels.URGENT}));
 
-    should.not.exist(_.first(ctx.notifications.findUnSnoozeable()));
+    should.not.exist(ctx.notifications.findUnSnoozeable()?.[0]);
 
     done();
   });
@@ -92,7 +91,7 @@ describe('treatmentnotify', function ( ) {
 
     treatmentnotify.checkNotifications(sbx);
 
-    var announcement = _.first(ctx.notifications.findUnSnoozeable());
+    var announcement = ctx.notifications.findUnSnoozeable()?.[0];
 
     should.exist(announcement);
     announcement.title.should.equal('Urgent Announcement');
@@ -113,7 +112,7 @@ describe('treatmentnotify', function ( ) {
 
     treatmentnotify.checkNotifications(sbx);
 
-    var announcement = _.first(ctx.notifications.findUnSnoozeable());
+    var announcement = ctx.notifications.findUnSnoozeable()?.[0];
 
     should.exist(announcement);
     announcement.title.should.equal('Announcement');
